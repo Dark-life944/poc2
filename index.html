@@ -74,7 +74,7 @@
                 const current = new Uint8Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data.buffer);
                 let differenceCount = 0;
                 const differences = [];
-                // Compare first 4096 bytes, record up to 20 differences
+                // Compare first 4096 bytes, record up to 50 differences
                 for (let i = 0; i < Math.min(original.length, 4096); i++) {
                     if (originalCopy[i] !== current[i]) {
                         try {
@@ -84,7 +84,7 @@
                                 newValue: current[i]
                             });
                             differenceCount++;
-                            if (differences.length >= 20) break; // Limit to 20
+                            if (differences.length >= 50) break; // Limit to 50
                         } catch (e) {
                             return { detected: true, differenceCount, differences, error: `Access error at offset ${i}: ${e.message}` };
                         }
