@@ -74,7 +74,7 @@
 
         function sprayHeap() {
             const arrays = [];
-            for (let i = 0; i < 500; i++) { // Reduced from 1000
+            for (let i = 0; i < 200; i++) { // Reduced from 1000
                 const buf = new ArrayBuffer(imageDataSize);
                 const view = new DataView(buf);
                 for (let j = 0; j < buf.byteLength; j += 16) {
