@@ -114,7 +114,7 @@
                 const refImageData = ctx.createImageData(512, 512);
                 const refView = new Uint8Array(refImageData.data.buffer);
                 for (let i = 0; i < refView.length; i++) {
-                    refView[i] = 0x46; // Can be changed (e.g., 0x41)
+                    refView[i] = 0x41; // Can be changed (e.g., 0x46)
                 }
 
                 // Intensive drawing
