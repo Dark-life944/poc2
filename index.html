@@ -73,26 +73,41 @@
             try {
                 const current = new Uint8Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data.buffer);
                 let differenceCount = 0;
-                const differences = [];
-                // Compare first 4096 bytes, record up to 50 differences
+                const ranges = [];
+                let currentRange = null;
+
+                // Compare first 4096 bytes, group consecutive changes
                 for (let i = 0; i < Math.min(original.length, 4096); i++) {
-                    if (originalCopy[i] !== current[i]) {
-                        try {
-                            differences.push({
-                                offset: i,
-                                original: originalCopy[i],
-                                newValue: current[i]
-                            });
+                    try {
+                        if (originalCopy[i] !== current[i]) {
                             differenceCount++;
-                            if (differences.length >= 50) break; // Limit to 50
-                        } catch (e) {
-                            return { detected: true, differenceCount, differences, error: `Access error at offset ${i}: ${e.message}` };
+                            if (!currentRange || currentRange.newValue !== current[i]) {
+                                if (currentRange) {
+                                    ranges.push(currentRange);
+                                }
+                                currentRange = {
+                                    start: i,
+                                    end: i,
+                                    original: originalCopy[i],
+                                    newValue: current[i]
+                                };
+                            } else {
+                                currentRange.end = i;
+                            }
+                        } else if (currentRange) {
+                            ranges.push(currentRange);
+                            currentRange = null;
                         }
+                    } catch (e) {
+                        return { detected: true, differenceCount, ranges, error: `Access error at offset ${i}: ${e.message}` };
                     }
                 }
-                return { detected: differenceCount > 0, differenceCount, differences };
+                if (currentRange) {
+                    ranges.push(currentRange);
+                }
+                return { detected: differenceCount > 0, differenceCount, ranges };
             } catch (e) {
-                return { detected: true, differenceCount: 0, differences: [], error: e.message };
+                return { detected: true, differenceCount: 0, ranges: [], error: e.message };
             }
         }
 
@@ -126,10 +141,10 @@
                         } else if (result.differenceCount > 0) {
                             status.textContent += `\n${result.differenceCount} bytes changed`;
                             log(`${result.differenceCount} bytes changed`);
-                            if (result.differences.length > 0) {
-                                log('Changed bytes:');
-                                for (const diff of result.differences) {
-                                    log(`Offset: ${diff.offset}, Original: 0x${diff.original.toString(16).padStart(2, '0')}, New: 0x${diff.newValue.toString(16).padStart(2, '0')}`);
+                            if (result.ranges.length > 0) {
+                                log('Changed ranges:');
+                                for (const range of result.ranges) {
+                                    log(`Offsets: ${range.start}-${range.end}, Original: 0x${range.original.toString(16).padStart(2, '0')}, New: 0x${range.newValue.toString(16).padStart(2, '0')}`);
                                 }
                             }
                         } else {
@@ -149,10 +164,10 @@
                             } else if (secondResult.differenceCount > 0) {
                                 status.textContent += `\n${secondResult.differenceCount} bytes changed`;
                                 log(`${secondResult.differenceCount} bytes changed`);
-                                if (secondResult.differences.length > 0) {
-                                    log('Changed bytes:');
-                                    for (const diff of secondResult.differences) {
-                                        log(`Offset: ${diff.offset}, Original: 0x${diff.original.toString(16).padStart(2, '0')}, New: 0x${diff.newValue.toString(16).padStart(2, '0')}`);
+                                if (secondResult.ranges.length > 0) {
+                                    log('Changed ranges:');
+                                    for (const range of secondResult.ranges) {
+                                        log(`Offsets: ${range.start}-${range.end}, Original: 0x${range.original.toString(16).padStart(2, '0')}, New: 0x${range.newValue.toString(16).padStart(2, '0')}`);
                                     }
                                 }
                             } else {
