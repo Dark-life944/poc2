@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -74,15 +73,26 @@
             try {
                 const current = new Uint8Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data.buffer);
                 let differenceCount = 0;
-                // Compare only first 4096 bytes to avoid crash
+                const differences = [];
+                // Compare first 4096 bytes, record up to 10 differences
                 for (let i = 0; i < Math.min(original.length, 4096); i++) {
                     if (originalCopy[i] !== current[i]) {
-                        differenceCount++;
+                        try {
+                            differences.push({
+                                offset: i,
+                                original: originalCopy[i],
+                                newValue: current[i]
+                            });
+                            differenceCount++;
+                            if (differences.length >= 10) break; // Limit to 10
+                        } catch (e) {
+                            return { detected: true, differenceCount, differences, error: `Access error at offset ${i}: ${e.message}` };
+                        }
                     }
                 }
-                return { detected: differenceCount > 0, differenceCount };
+                return { detected: differenceCount > 0, differenceCount, differences };
             } catch (e) {
-                return { detected: true, differenceCount: 0, error: e.message };
+                return { detected: true, differenceCount: 0, differences: [], error: e.message };
             }
         }
 
@@ -116,6 +126,12 @@
                         } else if (result.differenceCount > 0) {
                             status.textContent += `\n${result.differenceCount} bytes changed`;
                             log(`${result.differenceCount} bytes changed`);
+                            if (result.differences.length > 0) {
+                                log('First changed bytes:');
+                                for (const diff of result.differences) {
+                                    log(`Offset: ${diff.offset}, Original: 0x${diff.original.toString(16).padStart(2, '0')}, New: 0x${diff.newValue.toString(16).padStart(2, '0')}`);
+                                }
+                            }
                         } else {
                             status.textContent += '\nUAF occurred, no bytes checked';
                             log('UAF occurred, no bytes checked');
@@ -133,6 +149,12 @@
                             } else if (secondResult.differenceCount > 0) {
                                 status.textContent += `\n${secondResult.differenceCount} bytes changed`;
                                 log(`${secondResult.differenceCount} bytes changed`);
+                                if (secondResult.differences.length > 0) {
+                                    log('First changed bytes:');
+                                    for (const diff of secondResult.differences) {
+                                        log(`Offset: ${diff.offset}, Original: 0x${diff.original.toString(16).padStart(2, '0')}, New: 0x${diff.newValue.toString(16).padStart(2, '0')}`);
+                                    }
+                                }
                             } else {
                                 status.textContent += '\nUAF occurred, no bytes checked';
                                 log('UAF occurred, no bytes checked');
